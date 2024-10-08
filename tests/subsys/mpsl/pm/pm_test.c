@@ -18,11 +18,12 @@
 #include <mpsl/mpsl_pm_utils.h>
 #include <zephyr/kernel.h>
 
-
 #define PM_MAX_LATENCY_HCI_COMMANDS_US 499999
 
 #define TIME_TO_REGISTER_EVENT_IN_ZEPHYR_US 1000
-#define RETRY_TIME_MAX_US (UINT32_MAX - TIME_TO_REGISTER_EVENT_IN_ZEPHYR_US)
+
+#define TEST_RET_CURR_TIME_MS_INIT 0
+
 
 /* Mock implementation for mpsl_work_q*/
 struct k_work_q mpsl_work_q;
@@ -269,33 +270,37 @@ void test_register_enter_and_update_event(void)
 
 void test_event_delayed_work(void)
 {
-	uint64_t retry_evt_time = (uint64_t)UINT32_MAX + (uint64_t)UINT32_MAX + 5000;
+	uint64_t max_cycles_until_event = (uint64_t)UINT32_MAX + 5000;
+	uint64_t next_evt_in_us = k_cyc_to_us_floor64(max_cycles_until_event);
+	uint64_t event_delay_us = next_evt_in_us - (TEST_RET_CURR_TIME_MS_INIT * 1000) -
+				  TIME_TO_REGISTER_EVENT_IN_ZEPHYR_US;
+
 	test_vector_t test_vectors[] = {
 		/* Init. */
 		{true, false, {0, MPSL_PM_EVENT_STATE_NO_EVENTS_LEFT, 0},
 		 EVENT_FUNC_NONE, 0,
 		 LATENCY_FUNC_REGISTER, PM_MAX_LATENCY_HCI_COMMANDS_US},
 		/* Pretend we call workqueue delayed. */
-		{false, true, {retry_evt_time, MPSL_PM_EVENT_STATE_BEFORE_EVENT, 1},
-		 EVENT_FUNC_DELAY_SCHEDULING, RETRY_TIME_MAX_US,
-		 LATENCY_FUNC_NONE, 0},
-		/* Pretend we call workqueue delayed. */
-		{false, true, {retry_evt_time - RETRY_TIME_MAX_US,
-				MPSL_PM_EVENT_STATE_BEFORE_EVENT, 2},
-		 EVENT_FUNC_DELAY_SCHEDULING, RETRY_TIME_MAX_US,
+		{false, true, {event_delay_us, MPSL_PM_EVENT_STATE_BEFORE_EVENT, 1},
+		 EVENT_FUNC_DELAY_SCHEDULING, event_delay_us,
 		 LATENCY_FUNC_NONE, 0},
 		/* Register event. */
-		{false, true, {retry_evt_time - RETRY_TIME_MAX_US - RETRY_TIME_MAX_US,
-				MPSL_PM_EVENT_STATE_BEFORE_EVENT, 3},
-		 EVENT_FUNC_REGISTER, retry_evt_time - RETRY_TIME_MAX_US -
-				      RETRY_TIME_MAX_US,
+		/* Note: due to k_uptime_get() being an inline function calling a whole lot of
+		 * ifdef things with parameter of another inline function, it wasn't feasible to
+		 * mock this in a way to return a different uptime and test accordingly.
+		 * As such the event time is set to one that can be scheduled, verifying only that
+		 * we indeed go back into the workqueue, but not that the calculation of the check
+		 * is correct. Any ideas how to test this are welcome. */
+		{false, true, {1000,
+				MPSL_PM_EVENT_STATE_BEFORE_EVENT, 2},
+		 EVENT_FUNC_REGISTER, 1000,
 		 LATENCY_FUNC_NONE, 0},
 		/* Pretend to be in event */
-		{false, true, {0, MPSL_PM_EVENT_STATE_IN_EVENT, 4},
+		{false, true, {0, MPSL_PM_EVENT_STATE_IN_EVENT, 3},
 		 EVENT_FUNC_NONE, 0,
 		 LATENCY_FUNC_UPDATE, 0},
 		/* Deregister event. */
-		{false, true, {0, MPSL_PM_EVENT_STATE_NO_EVENTS_LEFT, 5},
+		{false, true, {0, MPSL_PM_EVENT_STATE_NO_EVENTS_LEFT, 4},
 		 EVENT_FUNC_UNREGISTER, 0,
 		 LATENCY_FUNC_UPDATE, PM_MAX_LATENCY_HCI_COMMANDS_US},
 	};
