@@ -14,9 +14,9 @@
 #include "cmock_mpsl_pm.h"
 #include "cmock_mpsl_pm_config.h"
 #include "cmock_mpsl_work.h"
+#include "cmock_kernel_minimal_mock.h"
 
 #include <mpsl/mpsl_pm_utils.h>
-#include <zephyr/kernel.h>
 
 #define PM_MAX_LATENCY_HCI_COMMANDS_US 499999
 
@@ -80,10 +80,12 @@ void run_test(test_vector_t *p_test_vectors, int num_test_vctr)
 
 			switch (v.event_func) {
 			case EVENT_FUNC_REGISTER:
+				__cmock_k_uptime_get_ExpectAndReturn(0);
 				__cmock_pm_policy_event_register_Expect(0, v.event_time_us);
 				__cmock_pm_policy_event_register_IgnoreArg_evt();
 				break;
 			case EVENT_FUNC_UPDATE:
+				__cmock_k_uptime_get_ExpectAndReturn(0);
 				__cmock_pm_policy_event_update_Expect(0, v.event_time_us);
 				__cmock_pm_policy_event_update_IgnoreArg_evt();
 				break;
@@ -91,7 +93,10 @@ void run_test(test_vector_t *p_test_vectors, int num_test_vctr)
 				__cmock_pm_policy_event_unregister_ExpectAnyArgs();
 				break;
 			case EVENT_FUNC_DELAY_SCHEDULING:
-				__cmock_mpsl_work_schedule_Expect(0, K_USEC(v.event_time_us));
+				// TODO: Add k_uptime retval to test vector
+				__cmock_k_uptime_get_ExpectAndReturn(0);
+				__cmock_K_USEC_ExpectAndReturn(v.event_time_us - 1000, (k_timeout_t){v.event_time_us + 123});
+				__cmock_mpsl_work_schedule_Expect(0, (k_timeout_t){v.event_time_us + 123});
 				__cmock_mpsl_work_schedule_IgnoreArg_dwork();
 				break;
 			case EVENT_FUNC_NONE:
