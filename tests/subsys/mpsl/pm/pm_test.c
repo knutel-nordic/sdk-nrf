@@ -91,11 +91,9 @@ void run_test(test_vector_t *p_test_vectors, int num_test_vctr)
 				__cmock_pm_policy_event_unregister_ExpectAnyArgs();
 				break;
 			case EVENT_FUNC_DELAY_SCHEDULING:
-				uint64_t usec = v.event_time_us - (v.curr_time_ms * 1000) -
-						TIME_TO_REGISTER_EVENT_IN_ZEPHYR_US;
 				__cmock_k_uptime_get_ExpectAndReturn(v.curr_time_ms);
-				__cmock_K_USEC_ExpectAndReturn(usec_in, (k_timeout_t){usec + 100});
-				__cmock_mpsl_work_schedule_Expect(0, (k_timeout_t){usec + 100});
+				__cmock_K_USEC_ExpectAndReturn(v.event_time_us, (k_timeout_t){v.event_time_us + 100});
+				__cmock_mpsl_work_schedule_Expect(0, (k_timeout_t){v.event_time_us + 100});
 				__cmock_mpsl_work_schedule_IgnoreArg_dwork();
 				break;
 			case EVENT_FUNC_NONE:
@@ -274,25 +272,23 @@ void test_register_enter_and_update_event(void)
 
 void test_event_delayed_work(void)
 {
-	int64_t next_curr_time_us = (UINT32_MAX / 1000);
-	uint64_t max_cycles_until_event = (uint64_t)UINT32_MAX + 50000;
-	uint64_t relative_time_us = k_cyc_to_us_floor64(max_cycles_until_event);
-	uint64_t event_time_abs_us = relative_time_us + next_curr_time_us;
+	uint64_t event_time_us = (uint64_t)UINT32_MAX + 50000;
+	/* Make sure time until event will be more than UINT32_MAX cycles away. */
+	TEST_ASSERT_GREATER_THAN_INT64(UINT32_MAX, k_us_to_cyc_floor64(event_time_us));
 
 	test_vector_t test_vectors[] = {
 		/* Init. */
 		{true, false, {0, MPSL_PM_EVENT_STATE_NO_EVENTS_LEFT, 0},
 		 EVENT_FUNC_NONE, 0,
 		 LATENCY_FUNC_REGISTER, PM_MAX_LATENCY_HCI_COMMANDS_US},
-		/* Pretend we call workqueue delayed. */
-		{false, true, {event_time_abs_us, MPSL_PM_EVENT_STATE_BEFORE_EVENT, 1},
-		 EVENT_FUNC_DELAY_SCHEDULING, event_time_abs_us,
+		/* Event time after 32 bit cycles have wrapped, so schedule retry. */
+		{false, true, {event_time_us, MPSL_PM_EVENT_STATE_BEFORE_EVENT, 1},
+		 EVENT_FUNC_DELAY_SCHEDULING, event_time_us - 1000,
 		 LATENCY_FUNC_NONE, 0, 0},
-		/* Register event. */
-		{false, true, {event_time_abs_us,
-				MPSL_PM_EVENT_STATE_BEFORE_EVENT, 2},
-		 EVENT_FUNC_REGISTER, event_time_abs_us,
-		 LATENCY_FUNC_NONE, 0, next_curr_time_us},
+		/* Time has progressed until cycles will no longer wrap, so register latency normally. */
+		{false, true, {event_time_us, MPSL_PM_EVENT_STATE_BEFORE_EVENT, 2},
+		 EVENT_FUNC_REGISTER, event_time_us,
+		 LATENCY_FUNC_NONE, 0, 100},
 		/* Pretend to be in event */
 		{false, true, {0, MPSL_PM_EVENT_STATE_IN_EVENT, 3},
 		 EVENT_FUNC_NONE, 0,
