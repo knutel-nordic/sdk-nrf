@@ -4,16 +4,22 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+#include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <mpsl_pm.h>
 #include <mpsl_pm_config.h>
 #include <zephyr/pm/policy.h>
 #include <zephyr/logging/log.h>
+#include <services/nrfs_mram.h>
+#include <nrfs_backend_ipc_service.h>
 
 #include <mpsl/mpsl_work.h>
 #include <mpsl/mpsl_pm_utils.h>
 
 LOG_MODULE_REGISTER(mpsl_pm_utils, CONFIG_MPSL_LOG_LEVEL);
+
+#define MPSL_PM_NRFS_INIT_PRIO 52
+BUILD_ASSERT(MPSL_PM_NRFS_INIT_PRIO > CONFIG_NRFS_BACKEND_IPC_SERVICE_INIT_PRIO);
 
 /* These constants must be updated once the Zephyr PM Policy API is updated
  * to handle low latency events. Ideally, the Policy API should be changed to use
@@ -32,7 +38,6 @@ static uint32_t                         m_prev_lat_value_us;
 static struct pm_policy_latency_request m_latency_req;
 static struct pm_policy_event           m_evt;
 
-
 static void m_update_latency_request(uint32_t lat_value_us)
 {
 	if (m_prev_lat_value_us != lat_value_us) {
@@ -41,8 +46,69 @@ static void m_update_latency_request(uint32_t lat_value_us)
 	}
 }
 
+static void m_mram_latency_callback(nrfs_mram_latency_evt_t const *p_evt, void *p_context)
+{
+	(void)p_context;
+	switch (p_evt->type) {
+	case NRFS_MRAM_LATENCY_REQ_APPLIED:
+		mpsl_pm_power_state_set(MPSL_PM_POWER_STATE_ON);
+		break;
+	case NRFS_MRAM_LATENCY_REQ_REJECTED:
+		LOG_ERR("MRAM latency handler - request rejected!");
+		__ASSERT_NO_MSG(false);
+		break;
+	default:
+		LOG_ERR("MRAM latency handler - unexpected event: 0x%x", p_evt->type);
+		__ASSERT_NO_MSG(false);
+		break;
+	}
+}
+
+static void m_mram_request_handler(void)
+{
+	switch(mpsl_pm_power_state_get())
+	{
+	case MPSL_PM_POWER_STATE_OFF:
+		if (mpsl_pm_power_requested())
+		{
+			mpsl_pm_power_state_set(MPSL_PM_POWER_STATE_REQUESTING);
+			nrfs_mram_set_latency(MRAM_LATENCY_NOT_ALLOWED, NULL);
+		}
+		break;
+	case MPSL_PM_POWER_STATE_REQUESTING:
+		break;
+	case MPSL_PM_POWER_STATE_ON:
+		if (!mpsl_pm_power_requested())
+		{
+			mpsl_pm_power_state_set(MPSL_PM_POWER_STATE_RELEASING);
+			nrfs_mram_set_latency(MRAM_LATENCY_ALLOWED, NULL);
+		}
+		break;
+	case MPSL_PM_POWER_STATE_RELEASING:
+		mpsl_pm_power_state_set(MPSL_PM_POWER_STATE_OFF);
+		break;
+	default:
+		__ASSERT_NO_MSG(false);
+	}
+}
+
+static int m_nrfs_mram_init(void)
+{
+	nrfs_err_t err = NRFS_SUCCESS;
+
+	err = nrfs_backend_wait_for_connection(K_FOREVER);
+	__ASSERT_NO_MSG(err == NRFS_SUCCESS);
+
+	err = nrfs_mram_init(m_mram_latency_callback);
+	__ASSERT_NO_MSG(err == NRFS_SUCCESS);
+
+	return err;
+}
+
 void mpsl_pm_utils_work_handler(void)
 {
+	m_mram_request_handler();
+
 	mpsl_pm_params_t params	= {0};
 	bool pm_param_valid = mpsl_pm_params_get(&params);
 
@@ -135,4 +201,7 @@ void mpsl_pm_utils_init(void)
 	mpsl_pm_params_get(&params);
 	m_pm_prev_flag_value = params.cnt_flag;
 	m_pm_event_is_registered = false;
+	mpsl_pm_power_state_set(MPSL_PM_POWER_STATE_OFF);
 }
+
+SYS_INIT(m_nrfs_mram_init, POST_KERNEL, MPSL_PM_NRFS_INIT_PRIO);
