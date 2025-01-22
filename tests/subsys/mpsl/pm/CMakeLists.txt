@@ -26,9 +26,11 @@ target_sources(app PRIVATE ${ZEPHYR_NRF_MODULE_DIR}/subsys/mpsl/pm/mpsl_pm_utils
 target_sources(app PRIVATE pm_test.c)
 
 # Include paths
-target_include_directories(app PRIVATE src)
+target_include_directories(app PRIVATE
+    src
+    ${ZEPHYR_NRF_MODULE_DIR}/subsys/mpsl/pm)
 
-# Preinclude file to the UUT to redefine mpsl_work_schedule().
+# Preinclude file to the UUT to redefine kernel and mpsl_work functions.
 set_property(SOURCE ${ZEPHYR_NRF_MODULE_DIR}/subsys/mpsl/pm/mpsl_pm_utils.c
         PROPERTY COMPILE_FLAGS "-include mocks/kernel_minimal_mock.h -include mocks/mpsl_work.h")
 

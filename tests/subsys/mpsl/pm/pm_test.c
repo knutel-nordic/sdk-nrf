@@ -16,7 +16,7 @@
 #include "cmock_mpsl_work.h"
 #include "cmock_kernel_minimal_mock.h"
 
-#include <mpsl/mpsl_pm_utils.h>
+#include "mpsl_pm_utils.h"
 
 #define PM_MAX_LATENCY_HCI_COMMANDS_US 499999
 
@@ -103,9 +103,9 @@ void run_test(test_vector_event_t *p_test_vectors, int num_test_vctr)
 			__cmock_k_uptime_get_ExpectAndReturn(v.curr_time_ms);
 			__cmock_K_USEC_ExpectAndReturn(
 				v.event_time_us, (k_timeout_t){v.event_time_us + 100});
-			__cmock_mpsl_work_schedule_Expect(
+			__cmock_mpsl_work_reschedule_Expect(
 				0, (k_timeout_t){v.event_time_us + 100});
-			__cmock_mpsl_work_schedule_IgnoreArg_dwork();
+			__cmock_mpsl_work_reschedule_IgnoreArg_dwork();
 			break;
 		case EVENT_FUNC_NONE:
 			break;
@@ -246,6 +246,35 @@ void test_event_delayed_work(void)
 		 EVENT_FUNC_UNREGISTER, 0, 0},
 	};
 	run_test(&test_vectors[0], ARRAY_SIZE(test_vectors));
+}
+
+void test_uninit(void)
+{
+	mpsl_pm_params_t pm_params_initial = {0};
+
+	__cmock_pm_policy_latency_request_add_Expect(0, PM_MAX_LATENCY_HCI_COMMANDS_US);
+	__cmock_pm_policy_latency_request_add_IgnoreArg_req();
+
+	__cmock_mpsl_pm_init_Expect();
+
+	__cmock_mpsl_pm_params_get_ExpectAnyArgsAndReturn(true);
+	__cmock_mpsl_pm_params_get_ReturnThruPtr_p_params(&pm_params_initial);
+
+	mpsl_pm_utils_init();
+
+	__cmock_mpsl_work_reschedule_Expect(
+		0, (k_timeout_t) { 0 });
+	__cmock_mpsl_work_reschedule_IgnoreArg_dwork();
+	__cmock_mpsl_pm_uninit_Expect();
+
+	mpsl_pm_utils_uninit();
+
+	__cmock_pm_policy_latency_request_remove_Expect(0);
+	__cmock_pm_policy_latency_request_remove_IgnoreArg_req();
+	__cmock_pm_policy_event_unregister_Expect(0);
+	__cmock_pm_policy_event_unregister_IgnoreArg_evt();
+	
+	mpsl_pm_utils_work_handler();
 }
 
 int main(void)

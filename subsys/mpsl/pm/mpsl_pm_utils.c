@@ -11,7 +11,7 @@
 #include <zephyr/logging/log.h>
 
 #include <mpsl/mpsl_work.h>
-#include <mpsl/mpsl_pm_utils.h>
+#include "mpsl_pm_utils.h"
 
 LOG_MODULE_REGISTER(mpsl_pm_utils, CONFIG_MPSL_LOG_LEVEL);
 
@@ -24,7 +24,9 @@ LOG_MODULE_REGISTER(mpsl_pm_utils, CONFIG_MPSL_LOG_LEVEL);
 #define PM_MAX_LATENCY_HCI_COMMANDS_US 499999
 
 static void m_work_handler(struct k_work *work);
-static K_WORK_DELAYABLE_DEFINE(pm_work, m_work_handler);
+static K_WORK_DELAYABLE_DEFINE(m_pm_work, m_work_handler);
+static K_WORK_DEFINE(m_pm_uninit_work, m_work_handler);
+static atomic_t m_pm_enabled;
 
 static uint8_t                          m_pm_prev_flag_value;
 static bool                             m_pm_event_is_registered;
@@ -80,12 +82,12 @@ void m_register_event(void)
 			uint64_t event_delay_us = params.event_time_abs_us - current_time_us -
 						  TIME_TO_REGISTER_EVENT_IN_ZEPHYR_US;
 #ifdef CONFIG_TIMEOUT_64BIT
-			mpsl_work_schedule(&pm_work, K_USEC(event_delay_us));
+			mpsl_work_reschedule(&m_pm_work, K_USEC(event_delay_us));
 #else
 			if (event_delay_us > UINT32_MAX) {
-				mpsl_work_schedule(&pm_work, K_USEC(UINT32_MAX));
+				mpsl_work_reschedule(&m_pm_work, K_USEC(UINT32_MAX));
 			} else {
-				mpsl_work_schedule(&pm_work, K_USEC((uint32_t)event_delay_us));
+				mpsl_work_reschedule(&m_pm_work, K_USEC((uint32_t)event_delay_us));
 			}
 #endif
 			return;
@@ -132,6 +134,11 @@ static void m_register_latency(void)
 
 void mpsl_pm_utils_work_handler(void)
 {
+	if (!atomic_get(&m_pm_enabled)) {
+		pm_policy_latency_request_remove(&m_latency_req);
+		pm_policy_event_unregister(&m_evt);
+		return;
+	}
 	m_register_event();
 	m_register_latency();
 }
@@ -146,6 +153,8 @@ void mpsl_pm_utils_init(void)
 {
 	mpsl_pm_params_t params = {0};
 
+	atomic_set(&m_pm_enabled, 1);
+
 	pm_policy_latency_request_add(&m_latency_req, PM_MAX_LATENCY_HCI_COMMANDS_US);
 	m_prev_lat_value_us = PM_MAX_LATENCY_HCI_COMMANDS_US;
 
@@ -153,4 +162,11 @@ void mpsl_pm_utils_init(void)
 	mpsl_pm_params_get(&params);
 	m_pm_prev_flag_value = params.cnt_flag;
 	m_pm_event_is_registered = false;
+}
+
+void mpsl_pm_utils_uninit(void)
+{
+	mpsl_pm_uninit();
+	atomic_set(&m_pm_enabled, 0);
+	mpsl_work_reschedule(&m_pm_uninit_work, K_NO_WAIT);
 }

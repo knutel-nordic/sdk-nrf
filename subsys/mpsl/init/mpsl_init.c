@@ -26,7 +26,7 @@
 #endif
 
 #if IS_ENABLED(CONFIG_MPSL_USE_ZEPHYR_PM)
-#include <mpsl/mpsl_pm_utils.h>
+#include "../pm/mpsl_pm_utils.h>
 #endif
 
 LOG_MODULE_REGISTER(mpsl_init, CONFIG_MPSL_LOG_LEVEL);
@@ -512,6 +512,10 @@ int32_t mpsl_lib_uninit(void)
 #endif /* CONFIG_CLOCK_CONTROL_NRF_K32SRC_RC && !CONFIG_SOC_SERIES_NRF54HX */
 
 	mpsl_lib_irq_disable();
+
+#if IS_ENABLED(CONFIG_MPSL_USE_ZEPHYR_PM)
+	mpsl_pm_utils_uninit();
+#endif
 
 	mpsl_uninit();
 
